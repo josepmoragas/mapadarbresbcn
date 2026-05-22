@@ -201,6 +201,63 @@ body{font-family:'Segoe UI',sans-serif;background:#1a1a2e;color:#eee;height:100v
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:#2d6a4f;border-radius:2px}
 
+/* Geolocation button */
+#geolocate-btn{
+  position:absolute;right:12px;bottom:56px;z-index:500;
+  width:44px;height:44px;border-radius:50%;
+  background:#16213e;border:2px solid #2d6a4f;
+  color:#95d5b2;font-size:1.2rem;
+  cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.5);
+  display:flex;align-items:center;justify-content:center;
+  transition:all .2s;
+}
+#geolocate-btn:hover{background:#2d6a4f;color:#fff}
+#geolocate-btn.locating{animation:pulse-geo 1s infinite}
+#geolocate-btn.located{background:#2d6a4f;color:#fff;border-color:#52b788}
+@keyframes pulse-geo{
+  0%,100%{box-shadow:0 2px 10px rgba(0,0,0,.5)}
+  50%{box-shadow:0 0 0 8px rgba(82,183,136,.25),0 2px 10px rgba(0,0,0,.5)}
+}
+.user-location-dot{
+  width:16px;height:16px;background:#4a9eff;border-radius:50%;
+  border:3px solid #fff;
+  box-shadow:0 0 0 4px rgba(74,158,255,.3),0 2px 8px rgba(0,0,0,.4);
+  animation:pulse-user 2s infinite;
+}
+@keyframes pulse-user{
+  0%,100%{box-shadow:0 0 0 4px rgba(74,158,255,.25),0 2px 8px rgba(0,0,0,.4)}
+  50%{box-shadow:0 0 0 10px rgba(74,158,255,.1),0 2px 8px rgba(0,0,0,.4)}
+}
+/* Nearby trees panel */
+#nearby-panel{
+  position:absolute;right:12px;top:12px;z-index:600;
+  background:#16213e;border:1px solid #2d6a4f;border-radius:12px;
+  padding:12px;width:220px;max-height:60vh;
+  box-shadow:0 4px 20px rgba(0,0,0,.5);
+  display:none;flex-direction:column;gap:8px;
+}
+#nearby-panel.visible{display:flex}
+.nearby-header{display:flex;align-items:center;justify-content:space-between}
+.nearby-title{font-size:.75rem;font-weight:700;color:#95d5b2;text-transform:uppercase;letter-spacing:.5px}
+.nearby-close{background:none;border:none;color:#666;cursor:pointer;font-size:1rem;line-height:1;padding:0}
+.nearby-close:hover{color:#ccc}
+.nearby-street{font-size:.72rem;color:#aaa;margin-top:-4px}
+.nearby-list{overflow-y:auto;display:flex;flex-direction:column;gap:4px}
+.nearby-list::-webkit-scrollbar{width:3px}
+.nearby-list::-webkit-scrollbar-thumb{background:#2d6a4f;border-radius:2px}
+.nearby-item{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;cursor:pointer;transition:background .15s;border:1px solid transparent}
+.nearby-item:hover{background:rgba(149,213,178,.12);border-color:rgba(149,213,178,.2)}
+.nearby-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.nearby-info{flex:1;min-width:0}
+.nearby-name{font-size:.78rem;color:#ddd;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nearby-addr{font-size:.68rem;color:#666;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nearby-dist{font-size:.68rem;color:#52b788;flex-shrink:0}
+.nearby-empty{font-size:.75rem;color:#666;text-align:center;padding:8px 0;font-style:italic}
+@media(max-width:600px){
+  #nearby-panel{right:8px;top:8px;width:200px;max-height:45vh}
+  #geolocate-btn{bottom:72px}
+}
+
 /* Mini chips strip in drawer handle (mobile) */
 #drawer-handle-wrap{display:block}
 #mini-chips-row{display:none}
@@ -388,7 +445,15 @@ body{font-family:'Segoe UI',sans-serif;background:#1a1a2e;color:#eee;height:100v
   </div>
   <div id="map">
     <div id="tooltip"><div class="tt-name" id="tt-name"></div><div class="tt-detail" id="tt-detail"></div></div>
-
+    <button id="geolocate-btn" onclick="geolocateUser()" title="La meva ubicació">📍</button>
+    <div id="nearby-panel">
+      <div class="nearby-header">
+        <span class="nearby-title">🌳 Arbres propers</span>
+        <button class="nearby-close" onclick="closeNearbyPanel()">✕</button>
+      </div>
+      <div class="nearby-street" id="nearby-street-name"></div>
+      <div class="nearby-list" id="nearby-list"></div>
+    </div>
   </div>
 </div>
 <div id="info-bar">
@@ -1433,6 +1498,114 @@ function placeStreetPin(lat, lon, name) {
     .addTo(map)
     .openPopup();
   map.flyTo([lat,lon],17,{duration:1.2});
+  setTimeout(() => showNearbyTrees(lat, lon, name), 1300);
+}
+
+// ── Nearby trees panel ───────────────────────────────────────────────────
+function haversineM(lat1,lon1,lat2,lon2) {
+  const R=6371000, r=Math.PI/180;
+  const dLat=(lat2-lat1)*r, dLon=(lon2-lon1)*r;
+  const a=Math.sin(dLat/2)**2+Math.cos(lat1*r)*Math.cos(lat2*r)*Math.sin(dLon/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+
+function showNearbyTrees(lat, lon, label) {
+  const RADIUS = 120;
+  const nearby = [];
+  for (const {row, color} of sampleDotData) {
+    const d = haversineM(lat, lon, row[0], row[1]);
+    if (d <= RADIUS) nearby.push({row, color, dist: d});
+  }
+  nearby.sort((a,b) => a.dist - b.dist);
+
+  document.getElementById('nearby-street-name').textContent = label;
+  const list = document.getElementById('nearby-list');
+  list.innerHTML = '';
+
+  if (!nearby.length) {
+    list.innerHTML = '<div class="nearby-empty">Cap arbre trobat a 120m</div>';
+  } else {
+    nearby.slice(0,30).forEach(({row, color, dist}) => {
+      const item = document.createElement('div');
+      item.className = 'nearby-item';
+      item.innerHTML = `
+        <div class="nearby-dot" style="background:${color}"></div>
+        <div class="nearby-info">
+          <div class="nearby-name">${row[2]||'Desconegut'}</div>
+          <div class="nearby-addr">${row[7]||''}</div>
+        </div>
+        <div class="nearby-dist">${Math.round(dist)}m</div>`;
+      item.addEventListener('click', () => {
+        map.setView([row[0],row[1]], 19);
+        L.popup({maxWidth:260})
+          .setLatLng([row[0],row[1]])
+          .setContent(buildPopup(row,color))
+          .openOn(map);
+      });
+      list.appendChild(item);
+    });
+    if (nearby.length > 30) {
+      const more = document.createElement('div');
+      more.className = 'nearby-empty';
+      more.textContent = `+${nearby.length-30} arbres més`;
+      list.appendChild(more);
+    }
+  }
+  document.getElementById('nearby-panel').classList.add('visible');
+}
+
+function closeNearbyPanel() {
+  document.getElementById('nearby-panel').classList.remove('visible');
+}
+
+// ── Geolocation ───────────────────────────────────────────────────────────
+let userMarker = null, userAccCircle = null;
+
+function geolocateUser() {
+  const btn = document.getElementById('geolocate-btn');
+  if (!navigator.geolocation) { alert('El teu navegador no suporta la geolocalització.'); return; }
+
+  if (userMarker) {
+    map.flyTo(userMarker.getLatLng(), 17, {duration:1});
+    showNearbyTrees(userMarker.getLatLng().lat, userMarker.getLatLng().lng, 'La teva ubicació');
+    return;
+  }
+
+  btn.classList.add('locating');
+  btn.textContent = '⏳';
+
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      const lat = pos.coords.latitude, lon = pos.coords.longitude, acc = pos.coords.accuracy;
+      if (userMarker)    { map.removeLayer(userMarker);    userMarker    = null; }
+      if (userAccCircle) { map.removeLayer(userAccCircle); userAccCircle = null; }
+      if (acc < 500) {
+        userAccCircle = L.circle([lat,lon], {
+          radius: acc, color:'#4a9eff', fillColor:'#4a9eff',
+          fillOpacity:.08, weight:1, opacity:.4
+        }).addTo(map);
+      }
+      const icon = L.divIcon({
+        html:'<div class="user-location-dot"></div>',
+        className:'', iconSize:[16,16], iconAnchor:[8,8]
+      });
+      userMarker = L.marker([lat,lon], {icon, zIndexOffset:900})
+        .bindPopup('<div style="color:#4a9eff;font-weight:700">📍 La teva ubicació</div>', {maxWidth:160})
+        .addTo(map);
+      map.flyTo([lat,lon], 17, {duration:1.2});
+      btn.classList.remove('locating');
+      btn.classList.add('located');
+      btn.textContent = '📍';
+      setTimeout(() => showNearbyTrees(lat, lon, 'La teva ubicació'), 1400);
+    },
+    (err) => {
+      btn.classList.remove('locating');
+      btn.textContent = '📍';
+      const msgs = {1:'Has denegat el permís de localització.',2:'No s\'ha pogut obtenir la ubicació.',3:'Temps d\'espera esgotat.'};
+      alert(msgs[err.code]||'Error de geolocalització.');
+    },
+    {enableHighAccuracy:true, timeout:10000, maximumAge:30000}
+  );
 }
 </script>
 </body>
