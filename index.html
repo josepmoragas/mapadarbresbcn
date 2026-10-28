@@ -431,35 +431,11 @@ map.on('mousemove', e => {
 
 // ── Admin boundaries ─────────────────────────────────────────────────────
 const barrisLayer = L.geoJSON({type:'FeatureCollection',features:ADMIN.barris},{
-  style:{color:'#95d5b2',weight:1,opacity:.4,fillColor:'#2d6a4f',fillOpacity:.04},
-  onEachFeature(feat,layer){
-    layer.on({
-      mouseover(e){
-        e.target.setStyle({fillOpacity:.16,weight:1.5});
-        document.getElementById('tt-name').textContent=feat.properties.nom;
-        document.getElementById('tt-detail').textContent='Barri · Districte '+feat.properties.districte;
-        tooltip.style.display='block';
-      },
-      mouseout(e){barrisLayer.resetStyle(e.target);tooltip.style.display='none';}
-    });
-  }
+  style:{color:'#95d5b2',weight:1,opacity:.4,fillColor:'#2d6a4f',fillOpacity:.04,interactive:false},
 }).addTo(map);
-// Polígons no han d'interceptar clics — els arbres estan per sobre
-barrisLayer.eachLayer(l => l.options.bubblingMouseEvents = false);
 
 const distLayer = L.geoJSON({type:'FeatureCollection',features:ADMIN.districtes},{
-  style:{color:'#f4a261',weight:2,opacity:.6,fillColor:'#e76f51',fillOpacity:.02},
-  onEachFeature(feat,layer){
-    layer.on({
-      mouseover(e){
-        e.target.setStyle({fillOpacity:.1,weight:2.5});
-        document.getElementById('tt-name').textContent=feat.properties.nom||'Districte';
-        document.getElementById('tt-detail').textContent='Districte · Barcelona';
-        tooltip.style.display='block';
-      },
-      mouseout(e){distLayer.resetStyle(e.target);tooltip.style.display='none';}
-    });
-  }
+  style:{color:'#f4a261',weight:2,opacity:.6,fillColor:'#e76f51',fillOpacity:.02,interactive:false},
 });
 
 document.getElementById('tog-barris').addEventListener('change',function(){
@@ -648,19 +624,25 @@ const WebGLLayer = L.Layer.extend({
       attribute vec2 a_pos;
       attribute vec3 a_col;
       uniform vec2 u_size;
+      uniform float u_psize;
       varying vec3 v_col;
       void main(){
         v_col = a_col;
         gl_Position = vec4((a_pos/u_size)*2.0-1.0, 0.0, 1.0);
-        gl_PointSize = 5.0;
+        gl_PointSize = u_psize;
       }`;
     const fs = `
       precision mediump float;
       varying vec3 v_col;
       void main(){
         vec2 c = gl_PointCoord - 0.5;
-        if(dot(c,c)>0.25) discard;
-        gl_FragColor = vec4(v_col, 0.88);
+        float d = dot(c,c);
+        if(d>0.25) discard;
+        // Contorn fosc a les vores exteriors del punt
+        float edge = smoothstep(0.18, 0.25, d);
+        vec3 col = mix(v_col, vec3(0.0,0.0,0.0), edge*0.75);
+        float alpha = mix(0.92, 0.5, edge);
+        gl_FragColor = vec4(col, alpha);
       }`;
     const compile = (type, src) => {
       const s = gl.createShader(type);
@@ -711,6 +693,12 @@ const WebGLLayer = L.Layer.extend({
 
     const uSize = gl.getUniformLocation(this._prog, 'u_size');
     gl.uniform2f(uSize, size.x, size.y);
+
+    // Mida dinàmica segons zoom: zoom 13=5px, zoom 16=9px, zoom 18=14px
+    const zoom = map.getZoom();
+    const psize = Math.max(4, Math.min(16, 2 + (zoom - 10) * 1.2));
+    const uPsize = gl.getUniformLocation(this._prog, 'u_psize');
+    gl.uniform1f(uPsize, psize);
 
     // Position buffer
     gl.bindBuffer(gl.ARRAY_BUFFER, this._bufPos);
